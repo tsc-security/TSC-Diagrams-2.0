@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Network Map</title>
+    <style>
+        .node {
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+        }
+    </style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <h1>AWS Network Map</h1>
+    <div id="network-diagram"></div>
+    <script>
+        async function fetchNetworkData() {
+            const response = await fetch('/network-map');
+            const data = await response.json();
+            return data;
+        }
+
+        function drawNetworkDiagram(data) {
+            const width = 960;
+            const height = 600;
+
+            const svg = d3.select("#network-diagram").append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+            const simulation = d3.forceSimulation()
+                .force("link", d3.forceLink().id(d => d.id))
+                .force("charge", d3.forceManyBody().strength(-200))
+                .force("center", d3.forceCenter(width / 2, height / 2));
+
+            const nodes = [];
+            const links = [];
+
+            // Process VPCs
+            data.VPCs.forEach(vpc => {
+                nodes.push({ id: vpc.VpcId, group: 'VPC' });
+            });
+
+            // Process Subnets
+            data.Subnets.forEach(subnet => {
+                nodes.push({ id: subnet.SubnetId, group: 'Subnet' });
+                links.push({ source: subnet.VpcId, target: subnet.SubnetId });
+            });
+
+            // Process Security Groups
+            data.SecurityGroups.forEach(sg => {
+                nodes.push({ id: sg.GroupId, group: 'SecurityGroup' });
+                if (sg.VpcId) {
+                    links.push({ source: sg.VpcId, target: sg.GroupId });
+                }
+            });
+
+            // Process Instances
+            data.Instances.forEach(instance => {
+                nodes.push({ id: instance.InstanceId, group: 'Instance' });
+                links.push({ source: instance.SubnetId, target: instance.InstanceId });
+            });
+
+            const link = svg.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(links)
+                .enter().append("line")
+                .attr("class", "link");
+
+            const node = svg.append("g")
+                .attr("class", "nodes")
+                .selectAll("circle")
+                .data(nodes)
+                .enter().append("circle")
+                .attr("class", "node")
+                .attr("r", 5)
+                .attr("fill", d => color(d.group))
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            node.append("title")
+                .text(d => d.id);
+
+            simulation
+                .nodes(nodes)
+                .on("tick", ticked);
+
+            simulation.force("link")
+                .links(links);
+
+            function ticked() {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+            }
+
+            function color(group) {
+                switch (group) {
+                    case 'VPC': return 'red';
+                    case 'Subnet': return 'blue';
+                    case 'SecurityGroup': return 'green';
+                    case 'Instance': return 'orange';
+                    default: return 'black';
+                }
+            }
+
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }
+
+        fetchNetworkData().then(data => {
+            drawNetworkDiagram(data);
+        });
+    </script>
+</body>
+</html>
